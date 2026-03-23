@@ -283,6 +283,32 @@ def download(uid, filename):
     return send_file(str(path), as_attachment=True, download_name=filename)
 
 
+@app.route("/preview-original", methods=["POST"])
+def preview_original():
+    """Convert an uploaded file's first page/frame to PNG for browser preview.
+    Only needed for formats browsers can't display natively (TIFF).
+    """
+    if "file" not in request.files:
+        return "No file", 400
+    f = request.files["file"]
+    raw = f.read()
+    try:
+        ext = Path(f.filename).suffix.lower()
+        if ext in PDF_EXTS:
+            doc = fitz.open(stream=raw, filetype="pdf")
+            pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+            pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            doc.close()
+        else:
+            pil = Image.open(BytesIO(raw)).convert("RGB")
+        buf = BytesIO()
+        pil.save(buf, format="PNG")
+        buf.seek(0)
+        return send_file(buf, mimetype="image/png")
+    except Exception as e:
+        return str(e), 500
+
+
 @app.route("/preview/<uid>/<filename>")
 def preview(uid, filename):
     """Serve a file inline for in-browser preview.
