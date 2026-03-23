@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Enhancer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --card:     #21253a;
+      --border:   #2e3350;
+      --accent:   #5b6ef5;
+      --accent2:  #7c8fff;
+      --success:  #34d399;
+      --error:    #f87171;
+      --text:     #e8eaf6;
+      --muted:    #8b90b8;
+      --radius:   14px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px 60px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #a0aaff, #5b6ef5);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    header p {
+      color: var(--muted);
+      margin-top: 6px;
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      width: 100%;
+      max-width: 680px;
+    }
+
+    /* Drop zone */
+    #drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 52px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      position: relative;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(91,110,245,.06);
+    }
+    #drop-zone svg { color: var(--accent); margin-bottom: 14px; }
+    #drop-zone p { color: var(--muted); font-size: 0.9rem; line-height: 1.6; }
+    #drop-zone strong { color: var(--text); }
+    #file-input { display: none; }
+
+    /* File chip */
+    #file-chip {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-top: 14px;
+    }
+    #file-chip.show { display: flex; }
+    #file-chip .name { font-size: 0.88rem; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #file-chip .remove { cursor: pointer; color: var(--muted); transition: color .15s; font-size: 1.1rem; line-height: 1; }
+    #file-chip .remove:hover { color: var(--error); }
+
+    /* Options row */
+    .options-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+      flex-wrap: wrap;
+    }
+    .opt-group { flex: 1; min-width: 130px; }
+    .opt-group label { display: block; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 7px; }
+    .opt-group select {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: 0.9rem;
+      appearance: none;
+      cursor: pointer;
+      transition: border-color .2s;
+    }
+    .opt-group select:focus { outline: none; border-color: var(--accent); }
+
+    /* Mode badges */
+    .mode-info {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 5px;
+    }
+
+    /* Submit */
+    #submit-btn {
+      margin-top: 26px;
+      width: 100%;
+      padding: 13px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.97rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s, opacity .2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    #submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    #submit-btn:not(:disabled):hover { background: var(--accent2); }
+
+    /* Progress */
+    #progress-wrap {
+      display: none;
+      margin-top: 22px;
+    }
+    #progress-wrap.show { display: block; }
+    .progress-bar-bg {
+      background: var(--surface);
+      border-radius: 999px;
+      height: 6px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), #a0aaff);
+      width: 0%;
+      transition: width .4s ease;
+      animation: shimmer 1.5s infinite;
+      background-size: 200% 100%;
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    #progress-label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    /* Result card */
+    #result-card {
+      display: none;
+      margin-top: 28px;
+      background: rgba(52,211,153,.07);
+      border: 1px solid rgba(52,211,153,.25);
+      border-radius: var(--radius);
+      padding: 24px;
+    }
+    #result-card.show { display: block; }
+    #result-card .result-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    #result-card .result-header span { font-weight: 600; font-size: 1rem; color: var(--success); }
+
+    .result-meta {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+    .meta-item { font-size: 0.83rem; color: var(--muted); }
+    .meta-item strong { color: var(--text); }
+
+    .result-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    #download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--success);
+      color: #0f1117;
+      font-weight: 700;
+      font-size: 0.92rem;
+      padding: 11px 22px;
+      border-radius: 9px;
+      text-decoration: none;
+      transition: opacity .2s;
+    }
+    #download-btn:hover { opacity: .85; }
+
+    #preview-toggle-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 0.88rem;
+      font-weight: 500;
+      padding: 10px 18px;
+      border-radius: 9px;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+    }
+    #preview-toggle-btn:hover { border-color: var(--accent); background: rgba(91,110,245,.06); }
+    #preview-toggle-btn.active { border-color: var(--accent); color: var(--accent2); }
+
+    /* Preview panel */
+    #preview-panel {
+      display: none;
+      margin-top: 20px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #0a0c14;
+    }
+    #preview-panel.show { display: block; }
+
+    #preview-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    #preview-toolbar strong { color: var(--text); }
+
+    #preview-body { position: relative; min-height: 120px; }
+
+    #preview-iframe {
+      width: 100%;
+      height: 65vh;
+      border: none;
+      display: block;
+    }
+    #preview-img {
+      display: block;
+      max-width: 100%;
+      margin: 0 auto;
+    }
+    #preview-zip-msg {
+      padding: 32px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.7;
+    }
+    #preview-zip-msg strong { color: var(--text); display: block; margin-bottom: 6px; }
+
+    #preview-loading {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: #0a0c14;
+      color: var(--muted); font-size: 0.85rem;
+    }
+    #preview-loading.hidden { display: none; }
+
+    /* Reprocess section */
+    #reprocess-section {
+      display: none;
+      margin-top: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    #reprocess-section.show { display: block; }
+    #reprocess-section h4 {
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+    .reprocess-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    .reprocess-row .opt-group { flex: 1; min-width: 110px; }
+    #reprocess-btn {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 9px;
+      padding: 10px 18px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s;
+      white-space: nowrap;
+      margin-bottom: 0;
+    }
+    #reprocess-btn:hover { background: var(--accent2); }
+    #reprocess-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* Error */
+    #error-box {
+      display: none;
+      margin-top: 18px;
+      background: rgba(248,113,113,.08);
+      border: 1px solid rgba(248,113,113,.3);
+      border-radius: 10px;
+      padding: 14px 16px;
+      color: var(--error);
+      font-size: 0.88rem;
+    }
+    #error-box.show { display: block; }
+
+    /* Tips */
+    .tips {
+      margin-top: 28px;
+      max-width: 680px;
+      width: 100%;
+    }
+    .tips h3 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); margin-bottom: 12px; }
+    .tips-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+    .tip-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .tip-card .tip-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 4px; }
+    .tip-card .tip-desc { font-size: 0.78rem; color: var(--muted); line-height: 1.5; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Document Enhancer</h1>
+  <p>Upload a scanned PDF or image — get back a clean, sharp, download-ready file.</p>
+</header>
+
+<div class="card">
+
+  <!-- Drop zone -->
+  <div id="drop-zone" role="button" tabindex="0" aria-label="Upload PDF">
+    <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round"
+        d="M12 16.5v-9m0 0-3 3m3-3 3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.338-2.02A4.125 4.125 0 0 1 18 19.5H6.75Z"/>
+    </svg>
+    <p><strong>Drop your file here</strong><br/>PDF, JPG, PNG, TIFF, BMP, WEBP</p>
+    <input type="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp,.webp" />
+  </div>
+
+  <div id="file-chip">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round"
+        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/>
+    </svg>
+    <span class="name" id="chip-name"></span>
+    <span class="remove" id="chip-remove" title="Remove">✕</span>
+  </div>
+
+  <!-- Options -->
+  <div class="options-row">
+    <div class="opt-group">
+      <label>Enhancement Mode</label>
+      <select id="mode-select">
+        <option value="color">Color</option>
+        <option value="grayscale">Grayscale</option>
+        <option value="bw">Black &amp; White</option>
+      </select>
+      <div class="mode-info" id="mode-hint">Preserves all color — best for letterheads &amp; stamps.</div>
+    </div>
+    <div class="opt-group">
+      <label>Output Format</label>
+      <select id="format-select">
+        <option value="pdf">PDF</option>
+        <option value="jpg">JPG</option>
+        <option value="png">PNG</option>
+        <option value="tiff">TIFF</option>
+      </select>
+      <div class="mode-info" id="format-hint">Multi-page PDFs exported as images are zipped.</div>
+    </div>
+    <div class="opt-group">
+      <label>Resolution (DPI)</label>
+      <select id="dpi-select">
+        <option value="150">150 — Draft</option>
+        <option value="200">200 — Standard</option>
+        <option value="300" selected>300 — High Quality</option>
+        <option value="400">400 — Very Fine Print</option>
+        <option value="600">600 — Archival</option>
+      </select>
+    </div>
+  </div>
+
+  <button id="submit-btn" disabled>
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z"/>
+    </svg>
+    Enhance Document
+  </button>
+
+  <!-- Progress -->
+  <div id="progress-wrap">
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+    <div id="progress-label">Analyzing and enhancing your document…</div>
+  </div>
+
+  <!-- Error -->
+  <div id="error-box"></div>
+
+  <!-- Result -->
+  <div id="result-card">
+    <div class="result-header">
+      <svg width="20" height="20" fill="none" stroke="#34d399" stroke-width="2.2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
+      </svg>
+      <span>Enhancement complete</span>
+    </div>
+    <div class="result-meta">
+      <div class="meta-item">File <strong id="r-filename"></strong></div>
+      <div class="meta-item">Size <strong id="r-size"></strong></div>
+    </div>
+    <div class="result-actions">
+      <button id="preview-toggle-btn">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+        </svg>
+        Preview
+      </button>
+      <a id="download-btn" href="#" download>
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/>
+        </svg>
+        Download
+      </a>
+    </div>
+
+    <!-- Preview panel -->
+    <div id="preview-panel">
+      <div id="preview-toolbar">
+        <span>Preview — <strong id="preview-filename"></strong></span>
+        <span id="preview-page-note"></span>
+      </div>
+      <div id="preview-body">
+        <div id="preview-loading">Loading preview…</div>
+        <iframe id="preview-iframe" style="display:none"></iframe>
+        <img id="preview-img" style="display:none" alt="Document preview" />
+        <div id="preview-zip-msg" style="display:none">
+          <strong>Multi-page ZIP export</strong>
+          Showing page 1 as preview. Download the ZIP to access all pages.
+        </div>
+      </div>
+    </div>
+
+    <!-- Reprocess section -->
+    <div id="reprocess-section">
+      <h4>Reprocess with different settings</h4>
+      <div class="reprocess-row">
+        <div class="opt-group">
+          <label>Mode</label>
+          <select id="rp-mode">
+            <option value="color">Color</option>
+            <option value="grayscale">Grayscale</option>
+            <option value="bw">Black &amp; White</option>
+          </select>
+        </div>
+        <div class="opt-group">
+          <label>Format</label>
+          <select id="rp-format">
+            <option value="pdf">PDF</option>
+            <option value="jpg">JPG</option>
+            <option value="png">PNG</option>
+            <option value="tiff">TIFF</option>
+          </select>
+        </div>
+        <div class="opt-group">
+          <label>DPI</label>
+          <select id="rp-dpi">
+            <option value="150">150</option>
+            <option value="200">200</option>
+            <option value="300" selected>300</option>
+            <option value="400">400</option>
+            <option value="600">600</option>
+          </select>
+        </div>
+        <button id="reprocess-btn">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/>
+          </svg>
+          Reprocess
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Tips -->
+<div class="tips">
+  <h3>Guide</h3>
+  <div class="tips-grid">
+    <div class="tip-card">
+      <div class="tip-title">Color</div>
+      <div class="tip-desc">Best for letterheads, stamps, photos, or any color content. Images return as JPG.</div>
+    </div>
+    <div class="tip-card">
+      <div class="tip-title">Grayscale</div>
+      <div class="tip-desc">Standard black-ink docs. Smaller file size, clean output. Images return as PNG.</div>
+    </div>
+    <div class="tip-card">
+      <div class="tip-title">Black &amp; White</div>
+      <div class="tip-desc">Maximum contrast for text-only scans. Smallest file, sharpest text. Images return as PNG.</div>
+    </div>
+    <div class="tip-card">
+      <div class="tip-title">Higher DPI</div>
+      <div class="tip-desc">Use 400–600 for very small print, signatures, or archival quality. Applies to PDF output.</div>
+    </div>
+    <div class="tip-card">
+      <div class="tip-title">Supported Inputs</div>
+      <div class="tip-desc">PDF, JPG, PNG, TIFF, BMP, WEBP. Multi-page PDFs are fully supported.</div>
+    </div>
+    <div class="tip-card">
+      <div class="tip-title">Output Formats</div>
+      <div class="tip-desc">PDFs stay as PDF. Images are returned as JPG (color) or PNG (grayscale/BW).</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── Element refs ──────────────────────────────────────────────────────────
+  const dropZone      = document.getElementById('drop-zone');
+  const fileInput     = document.getElementById('file-input');
+  const fileChip      = document.getElementById('file-chip');
+  const chipName      = document.getElementById('chip-name');
+  const chipRemove    = document.getElementById('chip-remove');
+  const submitBtn     = document.getElementById('submit-btn');
+  const modeSelect    = document.getElementById('mode-select');
+  const formatSelect  = document.getElementById('format-select');
+  const dpiSelect     = document.getElementById('dpi-select');
+  const modeHint      = document.getElementById('mode-hint');
+  const formatHint    = document.getElementById('format-hint');
+  const progressWrap  = document.getElementById('progress-wrap');
+  const progressFill  = document.getElementById('progress-fill');
+  const resultCard    = document.getElementById('result-card');
+  const errorBox      = document.getElementById('error-box');
+  const downloadBtn   = document.getElementById('download-btn');
+
+  // Preview
+  const previewToggleBtn = document.getElementById('preview-toggle-btn');
+  const previewPanel     = document.getElementById('preview-panel');
+  const previewFilename  = document.getElementById('preview-filename');
+  const previewPageNote  = document.getElementById('preview-page-note');
+  const previewLoading   = document.getElementById('preview-loading');
+  const previewIframe    = document.getElementById('preview-iframe');
+  const previewImg       = document.getElementById('preview-img');
+  const previewZipMsg    = document.getElementById('preview-zip-msg');
+
+  // Reprocess
+  const reprocessSection = document.getElementById('reprocess-section');
+  const rpMode    = document.getElementById('rp-mode');
+  const rpFormat  = document.getElementById('rp-format');
+  const rpDpi     = document.getElementById('rp-dpi');
+  const rpBtn     = document.getElementById('reprocess-btn');
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  let selectedFile  = null;
+  let currentResult = null;   // { uid, filename, download_url, preview_url, size_kb }
+
+  // ── Hints ─────────────────────────────────────────────────────────────────
+  const modeHints = {
+    color:     'Preserves all color — best for letterheads & stamps.',
+    grayscale: 'Grayscale output — smaller file, clean text.',
+    bw:        'Maximum contrast — ideal for text-only documents.',
+  };
+  const formatHints = {
+    pdf:  'Universal format — best for sharing & printing. Multi-page preserved.',
+    jpg:  'Compact photo-quality image. Multi-page PDFs download as a ZIP.',
+    png:  'Lossless image, great for BW/grayscale. Multi-page PDFs download as a ZIP.',
+    tiff: 'Archival quality image. Multi-page PDFs download as a ZIP.',
+  };
+
+  modeSelect.addEventListener('change',   () => { modeHint.textContent   = modeHints[modeSelect.value]; });
+  formatSelect.addEventListener('change', () => { formatHint.textContent = formatHints[formatSelect.value]; });
+
+  // ── Drop zone ─────────────────────────────────────────────────────────────
+  dropZone.addEventListener('click',   () => fileInput.click());
+  dropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+  dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+  chipRemove.addEventListener('click', clearFile);
+
+  const ALLOWED_EXTS = new Set(['.pdf','.jpg','.jpeg','.png','.tiff','.tif','.bmp','.webp']);
+
+  function setFile(f) {
+    const ext = '.' + f.name.split('.').pop().toLowerCase();
+    if (!ALLOWED_EXTS.has(ext)) {
+      showError('Unsupported file type. Please upload a PDF, JPG, PNG, TIFF, BMP, or WEBP.');
+      return;
+    }
+    selectedFile = f;
+    chipName.textContent = f.name;
+    fileChip.classList.add('show');
+    submitBtn.disabled = false;
+    hideResult();
+    hideError();
+  }
+
+  function clearFile() {
+    selectedFile = null;
+    fileInput.value = '';
+    fileChip.classList.remove('show');
+    submitBtn.disabled = true;
+    hideResult();
+  }
+
+  // ── Enhance ───────────────────────────────────────────────────────────────
+  submitBtn.addEventListener('click', async () => {
+    if (!selectedFile) return;
+    hideResult();
+    hideError();
+    showProgress('Analyzing and enhancing your document…');
+    submitBtn.disabled = true;
+
+    const form = new FormData();
+    form.append('file', selectedFile);
+    form.append('mode', modeSelect.value);
+    form.append('out_format', formatSelect.value);
+    form.append('dpi', dpiSelect.value);
+
+    const data = await runWithProgress(() =>
+      fetch('/enhance', { method: 'POST', body: form })
+    );
+    if (data) showResult(data);
+    submitBtn.disabled = false;
+  });
+
+  // ── Reprocess ─────────────────────────────────────────────────────────────
+  rpBtn.addEventListener('click', async () => {
+    if (!currentResult) return;
+    hidePreview();
+    showProgress('Reprocessing with new settings…');
+    rpBtn.disabled = true;
+
+    const data = await runWithProgress(() =>
+      fetch('/reprocess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid:        currentResult.uid,
+          filename:   currentResult.filename,
+          mode:       rpMode.value,
+          out_format: rpFormat.value,
+          dpi:        parseInt(rpDpi.value),
+        }),
+      })
+    );
+    if (data) showResult(data);
+    rpBtn.disabled = false;
+  });
+
+  // ── Preview ───────────────────────────────────────────────────────────────
+  previewToggleBtn.addEventListener('click', () => {
+    const open = previewPanel.classList.toggle('show');
+    previewToggleBtn.classList.toggle('active', open);
+    if (open && currentResult) loadPreview(currentResult);
+  });
+
+  function loadPreview(result) {
+    const ext = result.filename.split('.').pop().toLowerCase();
+    previewFilename.textContent = result.filename;
+    previewLoading.classList.remove('hidden');
+    previewIframe.style.display = 'none';
+    previewImg.style.display    = 'none';
+    previewZipMsg.style.display = 'none';
+    previewPageNote.textContent = '';
+
+    if (ext === 'pdf') {
+      previewIframe.onload = () => previewLoading.classList.add('hidden');
+      previewIframe.src = result.preview_url;
+      previewIframe.style.display = 'block';
+    } else if (ext === 'zip') {
+      previewZipMsg.style.display = 'block';
+      previewPageNote.textContent = 'Page 1 shown';
+      const img = new Image();
+      img.onload = () => {
+        previewImg.src = img.src;
+        previewImg.style.display = 'block';
+        previewZipMsg.style.display = 'none';
+        previewLoading.classList.add('hidden');
+      };
+      img.onerror = () => {
+        previewZipMsg.style.display = 'block';
+        previewLoading.classList.add('hidden');
+      };
+      img.src = result.preview_url;
+    } else {
+      // jpg, png, tiff → image (tiff converted server-side)
+      const img = new Image();
+      img.onload = () => {
+        previewImg.src = img.src;
+        previewImg.style.display = 'block';
+        previewLoading.classList.add('hidden');
+      };
+      img.src = result.preview_url;
+    }
+  }
+
+  function hidePreview() {
+    previewPanel.classList.remove('show');
+    previewToggleBtn.classList.remove('active');
+    previewIframe.src = '';
+    previewImg.src    = '';
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  async function runWithProgress(fetchFn) {
+    let pct = 0;
+    const ticker = setInterval(() => {
+      pct = Math.min(pct + Math.random() * 8, 88);
+      progressFill.style.width = pct + '%';
+    }, 400);
+
+    try {
+      const res = await fetchFn();
+      clearInterval(ticker);
+      progressFill.style.width = '100%';
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Processing failed');
+      await new Promise(r => setTimeout(r, 300));
+      hideProgress();
+      return data;
+    } catch (err) {
+      clearInterval(ticker);
+      hideProgress();
+      showError(err.message);
+      return null;
+    }
+  }
+
+  function showProgress(label) {
+    progressFill.style.width = '0%';
+    progressWrap.classList.add('show');
+  }
+  function hideProgress() { progressWrap.classList.remove('show'); }
+
+  function showResult(data) {
+    currentResult = data;
+    document.getElementById('r-filename').textContent = data.filename;
+    document.getElementById('r-size').textContent     = data.size_kb + ' KB';
+    downloadBtn.href = data.download_url;
+    downloadBtn.setAttribute('download', data.filename);
+    resultCard.classList.add('show');
+    reprocessSection.classList.add('show');
+    // Sync reprocess dropdowns to current settings
+    rpMode.value   = modeSelect.value;
+    rpFormat.value = formatSelect.value;
+    rpDpi.value    = dpiSelect.value;
+  }
+
+  function hideResult() {
+    resultCard.classList.remove('show');
+    reprocessSection.classList.remove('show');
+    hidePreview();
+    currentResult = null;
+  }
+
+  function showError(msg) { errorBox.textContent = '⚠ ' + msg; errorBox.classList.add('show'); }
+  function hideError()    { errorBox.classList.remove('show'); }
+</script>
+</body>
+</html>
