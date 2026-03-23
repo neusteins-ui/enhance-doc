@@ -19,8 +19,11 @@ from PIL import Image
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB
 
-UPLOAD_DIR = Path("uploads")
-OUTPUT_DIR = Path("outputs")
+# Use /tmp on Vercel (read-only FS except /tmp); fall back to local dirs otherwise
+import tempfile as _tempfile
+_TMP = Path(_tempfile.gettempdir())
+UPLOAD_DIR = _TMP / "enhance_uploads"
+OUTPUT_DIR = _TMP / "enhance_outputs"
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
