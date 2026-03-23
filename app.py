@@ -37,6 +37,26 @@ OUT_FORMATS = {"pdf", "jpg", "png", "tiff"}
 # Enhancement pipeline
 # ---------------------------------------------------------------------------
 
+def remove_shadow(img: np.ndarray) -> np.ndarray:
+    """Remove shadows and normalize background to white.
+    Accepts grayscale (H, W) or BGR/RGB (H, W, 3) uint8 arrays.
+    Strategy:
+      1. Dilate to flood-fill dark text so it doesn't bias background estimation.
+      2. Large Gaussian blur → smooth background illumination map.
+      3. Divide each channel by its background → normalize to white (255).
+    """
+    is_color = img.ndim == 3
+    channels = cv2.split(img) if is_color else [img]
+    kernel = np.ones((7, 7), np.uint8)
+    out = []
+    for ch in channels:
+        dilated = cv2.dilate(ch, kernel)
+        bg = cv2.GaussianBlur(dilated, (0, 0), sigmaX=40)
+        norm = cv2.divide(ch.astype(np.float32), bg.astype(np.float32), scale=255.0)
+        out.append(np.clip(norm, 0, 255).astype(np.uint8))
+    return cv2.merge(out) if is_color else out[0]
+
+
 def deskew(gray: np.ndarray) -> np.ndarray:
     edges = cv2.Canny(gray, 50, 150, apertureSize=3)
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100,
@@ -60,6 +80,7 @@ def deskew(gray: np.ndarray) -> np.ndarray:
 def enhance_color(bgr: np.ndarray, strength: float = 1.2) -> np.ndarray:
     denoised = cv2.fastNlMeansDenoisingColored(bgr, None, h=10, hColor=10,
                                                 templateWindowSize=7, searchWindowSize=21)
+    denoised = remove_shadow(denoised)
     gray = cv2.cvtColor(denoised, cv2.COLOR_BGR2GRAY)
     lines = cv2.HoughLinesP(cv2.Canny(gray, 50, 150, apertureSize=3),
                              1, np.pi / 180, threshold=100,
@@ -87,6 +108,7 @@ def enhance_color(bgr: np.ndarray, strength: float = 1.2) -> np.ndarray:
 def enhance_gray(gray: np.ndarray, strength: float = 1.5) -> np.ndarray:
     denoised = cv2.fastNlMeansDenoising(gray, None, h=10,
                                          templateWindowSize=7, searchWindowSize=21)
+    denoised = remove_shadow(denoised)
     contrasted = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(deskew(denoised))
     blurred = cv2.GaussianBlur(contrasted, (0, 0), sigmaX=3)
     return cv2.addWeighted(contrasted, 1 + strength, blurred, -strength, 0)
@@ -94,6 +116,7 @@ def enhance_gray(gray: np.ndarray, strength: float = 1.5) -> np.ndarray:
 
 def to_bw(gray: np.ndarray) -> np.ndarray:
     denoised = cv2.fastNlMeansDenoising(gray, None, h=10)
+    denoised = remove_shadow(denoised)
     bw = cv2.adaptiveThreshold(deskew(denoised), 255,
                                 cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                 cv2.THRESH_BINARY, 31, 10)
