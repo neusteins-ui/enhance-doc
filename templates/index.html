@@ -417,8 +417,7 @@
     </div>
     <div class="prev-body">
       <div class="prev-loading" id="orig-prev-loading">Loading preview…</div>
-      <iframe class="prev-iframe" id="orig-prev-iframe" style="display:none"></iframe>
-      <img    class="prev-img"    id="orig-prev-img"    style="display:none" alt="Original document" />
+      <img class="prev-img" id="orig-prev-img" style="display:none" alt="Original document" />
     </div>
   </div>
 
@@ -613,7 +612,6 @@
   const origPreviewPanel  = document.getElementById('orig-preview-panel');
   const origPrevFilename  = document.getElementById('orig-prev-filename');
   const origPrevLoading   = document.getElementById('orig-prev-loading');
-  const origPrevIframe    = document.getElementById('orig-prev-iframe');
   const origPrevImg       = document.getElementById('orig-prev-img');
   let   origBlobUrl       = null;  // revoke on clear
 
@@ -705,8 +703,8 @@
     // Revoke previous blob URL to avoid memory leaks
     if (origBlobUrl) { URL.revokeObjectURL(origBlobUrl); origBlobUrl = null; }
 
-    if (raw === 'tiff' || raw === 'tif') {
-      // Browser can't display TIFF — convert to PNG on server
+    if (raw === 'pdf' || raw === 'tiff' || raw === 'tif') {
+      // PDF and TIFF: render first page to PNG on server (blob PDF iframes are unreliable)
       const form = new FormData();
       form.append('file', file);
       try {
@@ -717,13 +715,8 @@
         origPrevImg.onload = () => origPrevLoading.classList.add('hidden');
         origPrevImg.style.display = 'block';
       } catch (_) { origPrevLoading.classList.add('hidden'); }
-    } else if (raw === 'pdf') {
-      origBlobUrl = URL.createObjectURL(file);
-      origPrevIframe.onload = () => origPrevLoading.classList.add('hidden');
-      origPrevIframe.src = origBlobUrl;
-      origPrevIframe.style.display = 'block';
     } else {
-      // jpg, jpeg, png, bmp, webp — browsers handle natively
+      // jpg, jpeg, png, bmp, webp — browsers handle natively via blob URL
       origBlobUrl = URL.createObjectURL(file);
       origPrevImg.src = origBlobUrl;
       origPrevImg.onload = () => origPrevLoading.classList.add('hidden');
@@ -733,8 +726,7 @@
 
   function hideOriginalPreview() {
     origPreviewPanel.classList.remove('show');
-    origPrevIframe.src = '';
-    origPrevImg.src    = '';
+    origPrevImg.src = '';
     if (origBlobUrl) { URL.revokeObjectURL(origBlobUrl); origBlobUrl = null; }
   }
 
