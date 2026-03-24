@@ -37,57 +37,64 @@ OUT_FORMATS = {"pdf", "jpg", "png", "tiff"}
 # Enhancement pipeline
 # ---------------------------------------------------------------------------
 
-def remove_shadow(img: np.ndarray) -> np.ndarray:
-    """Remove uneven illumination, shadows, and dark phone-camera borders.
-    Uses aggressive dilation + very large blur to estimate the background
-    illumination map, then divides to normalize everything to ~white.
+def estimate_background(ch: np.ndarray) -> np.ndarray:
+    """Estimate the background illumination of a document page.
+    Uses morphological closing on a downscaled copy (fast), then upscales.
+    This is how real scanner apps work — morph close fills ALL dark features
+    (text, stamps, signatures) leaving only the paper/background.
+    """
+    h, w = ch.shape[:2]
+    # Downscale to ~512px for fast morphological operation
+    target = 512
+    scale = min(target / max(h, w), 1.0)
+    if scale < 1.0:
+        small = cv2.resize(ch, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    else:
+        small = ch.copy()
+    sh, sw = small.shape[:2]
+    # Kernel size: ~1/6th of image — large enough to bridge any text
+    ksize = max(sh, sw) // 6
+    ksize = ksize | 1  # ensure odd
+    ksize = max(ksize, 31)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+    # Morph close: dilate then erode — fills dark features, background remains
+    bg_small = cv2.morphologyEx(small, cv2.MORPH_CLOSE, kernel)
+    # Smooth to remove any residual texture
+    bg_small = cv2.GaussianBlur(bg_small, (0, 0), sigmaX=ksize * 0.8)
+    # Upscale back to original size
+    if scale < 1.0:
+        bg = cv2.resize(bg_small, (w, h), interpolation=cv2.INTER_LINEAR)
+    else:
+        bg = bg_small
+    # Final smooth at full res for seamless transitions
+    full_sigma = max(h, w) * 0.02
+    return cv2.GaussianBlur(bg, (0, 0), sigmaX=full_sigma)
+
+
+def enhance_document(img: np.ndarray, power: float = 2.2) -> np.ndarray:
+    """Core enhancement: morphological background removal + power curve.
+    1. Estimate background via morph close (handles ALL shadows and borders)
+    2. Divide by background → normalized image (background ≈ 1.0, text < 1.0)
+    3. Power curve: text gets much darker, background stays white
+    4. Clip residual near-white to pure 255
     """
     is_color = img.ndim == 3
     channels = cv2.split(img) if is_color else [img]
-    # Large kernel with 2 iterations fills text gaps up to ~42px
-    kernel = np.ones((21, 21), np.uint8)
     out = []
     for ch in channels:
-        dilated = cv2.dilate(ch, kernel, iterations=2)
-        # Very large sigma handles gradual shadows AND dark borders from phone scans
-        bg = cv2.GaussianBlur(dilated, (0, 0), sigmaX=120)
-        norm = cv2.divide(ch.astype(np.float32), bg.astype(np.float32), scale=255.0)
-        out.append(np.clip(norm, 0, 255).astype(np.uint8))
+        bg = estimate_background(ch)
+        # Normalize: divide by background → background ≈ 1.0, text < 1.0
+        norm = ch.astype(np.float64) / np.maximum(bg.astype(np.float64), 1.0)
+        norm = np.clip(norm, 0, 1)
+        # Power curve: dramatically increases text-background separation
+        # power=2.2: a pixel at 0.7 (light gray) → 0.7^2.2 = 0.46 (much darker)
+        #            a pixel at 0.95 (near-white) → 0.95^2.2 = 0.89 → clipped to white
+        enhanced = np.power(norm, power) * 255.0
+        enhanced = np.clip(enhanced, 0, 255)
+        # Clip residual near-white to pure white (kills last traces of gray paper)
+        enhanced[enhanced > 245] = 255
+        out.append(enhanced.astype(np.uint8))
     return cv2.merge(out) if is_color else out[0]
-
-
-def auto_levels(img: np.ndarray) -> np.ndarray:
-    """Stretch dynamic range so text → near-black and paper → pure white.
-    Replaces separate whiten_background + darken_text with one clean operation.
-    Works in LAB space for color images to preserve hue.
-    """
-    if img.ndim == 3:
-        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        l = _auto_levels_ch(l)
-        return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
-    else:
-        return _auto_levels_ch(img)
-
-
-def _auto_levels_ch(ch: np.ndarray) -> np.ndarray:
-    """Auto-levels on a single channel: stretch, white-floor, darken text."""
-    f = ch.astype(np.float32)
-    # Find actual content range (ignore outlier pixels)
-    p_dark = np.percentile(f, 2)     # ~text ink level
-    p_light = np.percentile(f, 92)   # ~paper level
-    if p_light <= p_dark + 10:
-        return ch
-    # Stretch so text → near 0 and paper → 255
-    stretched = (f - p_dark) / (p_light - p_dark) * 255.0
-    stretched = np.clip(stretched, 0, 255)
-    # White floor: anything above 235 → pure white (kills residual gray on paper)
-    stretched[stretched > 235] = 255
-    # Darken text: adaptive gamma pulls dark pixels darker, leaves white alone
-    norm = stretched / 255.0
-    gamma = 1.0 + 0.6 * (1.0 - norm)  # 1.6 for black → 1.0 for white
-    result = np.power(np.clip(norm, 1e-6, 1.0), gamma) * 255.0
-    return np.clip(result, 0, 255).astype(np.uint8)
 
 
 def deskew(gray: np.ndarray) -> np.ndarray:
@@ -111,7 +118,6 @@ def deskew(gray: np.ndarray) -> np.ndarray:
 
 
 def deskew_color(bgr: np.ndarray) -> np.ndarray:
-    """Deskew a color image."""
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 50, 150, apertureSize=3)
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100,
@@ -133,36 +139,27 @@ def deskew_color(bgr: np.ndarray) -> np.ndarray:
 
 
 def enhance_color(bgr: np.ndarray) -> np.ndarray:
-    """Color document enhancement — scanner-quality output from phone scans."""
-    # 1. Bilateral filter — smooths noise while PRESERVING text edges
-    #    (unlike fastNlMeans which smears everything including text)
-    smooth = cv2.bilateralFilter(bgr, d=9, sigmaColor=75, sigmaSpace=75)
-    # 2. Aggressive shadow removal — kills uneven lighting AND dark borders
-    clean = remove_shadow(smooth)
-    # 3. Auto-levels — stretches range, whitens paper, darkens text in one pass
-    clean = auto_levels(clean)
-    # 4. Deskew
+    """Color: scanner-quality output from phone camera scans."""
+    # 1. Morphological background removal + power curve (the only step that matters)
+    clean = enhance_document(bgr, power=2.2)
+    # 2. Deskew
     clean = deskew_color(clean)
-    # 5. Tight sharpening — small sigma (0.7) = crisp edges without halos
-    blurred = cv2.GaussianBlur(clean, (0, 0), sigmaX=0.7)
-    return cv2.addWeighted(clean, 1.8, blurred, -0.8, 0)
+    # 3. Tight sharpening for crisp text
+    blurred = cv2.GaussianBlur(clean, (0, 0), sigmaX=0.8)
+    return cv2.addWeighted(clean, 1.5, blurred, -0.5, 0)
 
 
 def enhance_gray(gray: np.ndarray) -> np.ndarray:
-    """Grayscale document enhancement."""
-    smooth = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
-    clean = remove_shadow(smooth)
-    clean = auto_levels(clean)
+    """Grayscale: clean white background, dark crisp text."""
+    clean = enhance_document(gray, power=2.5)
     clean = deskew(clean)
-    blurred = cv2.GaussianBlur(clean, (0, 0), sigmaX=0.7)
-    return cv2.addWeighted(clean, 1.8, blurred, -0.8, 0)
+    blurred = cv2.GaussianBlur(clean, (0, 0), sigmaX=0.8)
+    return cv2.addWeighted(clean, 1.5, blurred, -0.5, 0)
 
 
 def to_bw(gray: np.ndarray) -> np.ndarray:
-    """Black & white: maximum text clarity, pure white background."""
-    smooth = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
-    clean = remove_shadow(smooth)
-    clean = auto_levels(clean)
+    """Black & white: pure black text on pure white background."""
+    clean = enhance_document(gray, power=2.0)
     bw = cv2.adaptiveThreshold(deskew(clean), 255,
                                 cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                 cv2.THRESH_BINARY, 31, 10)
