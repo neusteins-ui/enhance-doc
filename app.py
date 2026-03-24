@@ -39,35 +39,39 @@ OUT_FORMATS = {"pdf", "jpg", "png", "tiff"}
 
 def estimate_background(ch: np.ndarray) -> np.ndarray:
     """Estimate the background illumination of a document page.
-    Uses morphological closing on a downscaled copy (fast), then upscales.
-    This is how real scanner apps work — morph close fills ALL dark features
-    (text, stamps, signatures) leaving only the paper/background.
+    Uses morphological closing on an aggressively downscaled copy, then upscales.
+    Small working size = kernel covers more area = better at handling
+    dark borders, vignetting, and gradual shadows at ANY input DPI.
     """
     h, w = ch.shape[:2]
-    # Downscale to ~512px for fast morphological operation
-    target = 512
+    # Downscale aggressively — smaller = kernel covers more relative area
+    # This is why 150 DPI looked better: less pixels = better bg estimation
+    target = 256
     scale = min(target / max(h, w), 1.0)
     if scale < 1.0:
         small = cv2.resize(ch, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     else:
         small = ch.copy()
+    # Median blur kills fine patterns (check security lines, paper texture)
+    # that would otherwise pollute the background estimate
+    small = cv2.medianBlur(small, 5)
     sh, sw = small.shape[:2]
-    # Kernel size: ~1/6th of image — large enough to bridge any text
-    ksize = max(sh, sw) // 6
+    # Kernel: 1/4 of image — very large to bridge ALL dark features
+    ksize = max(sh, sw) // 4
     ksize = ksize | 1  # ensure odd
     ksize = max(ksize, 31)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
-    # Morph close: dilate then erode — fills dark features, background remains
+    # Morph close: fills text, stamps, borders — leaves only paper background
     bg_small = cv2.morphologyEx(small, cv2.MORPH_CLOSE, kernel)
-    # Smooth to remove any residual texture
-    bg_small = cv2.GaussianBlur(bg_small, (0, 0), sigmaX=ksize * 0.8)
-    # Upscale back to original size
+    # Heavy smooth to make it a pure illumination map
+    bg_small = cv2.GaussianBlur(bg_small, (0, 0), sigmaX=ksize)
+    # Upscale back
     if scale < 1.0:
         bg = cv2.resize(bg_small, (w, h), interpolation=cv2.INTER_LINEAR)
     else:
         bg = bg_small
-    # Final smooth at full res for seamless transitions
-    full_sigma = max(h, w) * 0.02
+    # Final smooth at full res — 3% of image size for seamless transitions
+    full_sigma = max(h, w) * 0.03
     return cv2.GaussianBlur(bg, (0, 0), sigmaX=full_sigma)
 
 
