@@ -696,8 +696,7 @@
     const raw = file.name.split('.').pop().toLowerCase();
     origPrevFilename.textContent = file.name;
     origPrevLoading.classList.remove('hidden');
-    origPrevIframe.style.display = 'none';
-    origPrevImg.style.display    = 'none';
+    origPrevImg.style.display = 'none';
     origPreviewPanel.classList.add('show');
 
     // Revoke previous blob URL to avoid memory leaks
@@ -791,11 +790,7 @@
     previewZipMsg.style.display = 'none';
     previewPageNote.textContent = '';
 
-    if (ext === 'pdf') {
-      previewIframe.onload = () => previewLoading.classList.add('hidden');
-      previewIframe.src = result.preview_url;
-      previewIframe.style.display = 'block';
-    } else if (ext === 'zip') {
+    if (ext === 'zip') {
       previewZipMsg.style.display = 'block';
       previewPageNote.textContent = 'Page 1 shown';
       const img = new Image();
@@ -825,8 +820,7 @@
   function hidePreview() {
     previewPanel.classList.remove('show');
     previewToggleBtn.classList.remove('active');
-    previewIframe.src = '';
-    previewImg.src    = '';
+    previewImg.src = '';
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

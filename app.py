@@ -320,9 +320,16 @@ def preview(uid, filename):
 
     ext = Path(filename).suffix.lower()
 
-    # PDF — serve inline so browser renders it
+    # PDF — render first page to PNG (iframe PDF blobs are unreliable across browsers)
     if ext == ".pdf":
-        return send_file(str(path), mimetype="application/pdf")
+        doc = fitz.open(str(path))
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+        pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        doc.close()
+        buf = BytesIO()
+        pil.save(buf, format="PNG")
+        buf.seek(0)
+        return send_file(buf, mimetype="image/png")
 
     # TIFF — convert first page to PNG for browser display
     if ext in (".tiff", ".tif"):
