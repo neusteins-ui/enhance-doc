@@ -173,6 +173,18 @@ def to_bw(gray: np.ndarray) -> np.ndarray:
     return cv2.morphologyEx(bw, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
 
 
+def rotate_image(pil_img: Image.Image, degrees: int) -> Image.Image:
+    """Rotate a PIL image by 0/90/180/270 degrees clockwise."""
+    degrees = degrees % 360
+    if degrees == 90:
+        return pil_img.transpose(Image.ROTATE_270)
+    elif degrees == 180:
+        return pil_img.transpose(Image.ROTATE_180)
+    elif degrees == 270:
+        return pil_img.transpose(Image.ROTATE_90)
+    return pil_img
+
+
 def enhance_page(arr_rgb: np.ndarray, mode: str) -> Image.Image:
     """Enhance one RGB numpy array and return a PIL Image."""
     if mode == "bw":
@@ -253,12 +265,16 @@ def pages_to_zip(pil_pages: list[Image.Image], stem: str, fmt: str, dpi: int) ->
 # ---------------------------------------------------------------------------
 
 def process(input_path: Path, mode: str, dpi: int,
-            out_format: str, stem: str) -> tuple[bytes, str]:
+            out_format: str, stem: str, rotation: int = 0) -> tuple[bytes, str]:
     """
     Returns (output_bytes, output_filename).
     out_format: 'pdf' | 'jpg' | 'png' | 'tiff'
+    rotation:   0, 90, 180, 270 degrees clockwise
     """
     raw_pages  = load_pages(input_path, dpi)
+    # Apply rotation before enhancement
+    if rotation % 360 != 0:
+        raw_pages = [rotate_image(p, rotation) for p in raw_pages]
     enh_pages  = [enhance_page(np.array(p), mode) for p in raw_pages]
     multi_page = len(enh_pages) > 1
 
@@ -300,6 +316,7 @@ def enhance():
     dpi = int(request.form.get("dpi", 300))
     if dpi not in (150, 200, 300, 400, 600):
         dpi = 300
+    rotation = int(request.form.get("rotation", 0)) % 360
 
     uid  = uuid.uuid4().hex[:8]
     stem = Path(f.filename).stem
@@ -307,7 +324,7 @@ def enhance():
     f.save(str(input_path))
 
     try:
-        out_bytes, output_name = process(input_path, mode, dpi, out_format, stem)
+        out_bytes, output_name = process(input_path, mode, dpi, out_format, stem, rotation)
     except Exception as e:
         input_path.unlink(missing_ok=True)
         return jsonify(error=str(e)), 500

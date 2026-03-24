@@ -360,6 +360,34 @@
     }
     .prev-loading.hidden { display: none; }
 
+    /* Rotate controls */
+    .rotate-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .rotate-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px; height: 30px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      cursor: pointer;
+      transition: border-color .2s, color .2s, background .2s;
+      padding: 0;
+    }
+    .rotate-btn:hover { border-color: var(--accent); color: var(--accent2); background: rgba(91,110,245,.08); }
+    .rotate-angle {
+      font-size: 0.7rem;
+      color: var(--muted);
+      min-width: 30px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
     /* Error */
     #error-box {
       display: none;
@@ -423,10 +451,23 @@
   <div id="orig-preview-panel">
     <div class="prev-toolbar">
       <span><span class="prev-badge before">Before</span><strong id="orig-prev-filename"></strong></span>
+      <div class="rotate-controls">
+        <button class="rotate-btn" id="rotate-left-btn" title="Rotate left 90°">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/>
+          </svg>
+        </button>
+        <span class="rotate-angle" id="rotate-angle-label">0°</span>
+        <button class="rotate-btn" id="rotate-right-btn" title="Rotate right 90°">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 15l6-6m0 0-6-6m6 6H9a6 6 0 0 0 0 12h3"/>
+          </svg>
+        </button>
+      </div>
     </div>
     <div class="prev-body">
       <div class="prev-loading" id="orig-prev-loading">Loading preview…</div>
-      <img class="prev-img" id="orig-prev-img" style="display:none" alt="Original document" />
+      <img class="prev-img" id="orig-prev-img" style="display:none;transition:transform .3s ease" alt="Original document" />
     </div>
   </div>
 
@@ -623,6 +664,9 @@
   const origPrevLoading   = document.getElementById('orig-prev-loading');
   const origPrevImg       = document.getElementById('orig-prev-img');
   let   origBlobUrl       = null;  // revoke on clear
+  const rotateLeftBtn     = document.getElementById('rotate-left-btn');
+  const rotateRightBtn    = document.getElementById('rotate-right-btn');
+  const rotateAngleLabel  = document.getElementById('rotate-angle-label');
 
   // After (enhanced) preview
   const previewToggleBtn = document.getElementById('preview-toggle-btn');
@@ -644,6 +688,7 @@
   // ── State ─────────────────────────────────────────────────────────────────
   let selectedFile  = null;
   let currentResult = null;   // { uid, filename, download_url, preview_url, size_kb }
+  let rotationDeg   = 0;      // 0, 90, 180, 270
 
   // ── Hints ─────────────────────────────────────────────────────────────────
   const modeHints = {
@@ -710,6 +755,8 @@
     submitBtn.disabled = false;
     hideResult();
     hideError();
+    rotationDeg = 0;
+    updateRotation();
     loadOriginalPreview(f);
   }
 
@@ -721,6 +768,20 @@
     hideResult();
     hideOriginalPreview();
   }
+
+  // ── Rotation controls ────────────────────────────────────────────────────
+  function updateRotation() {
+    rotateAngleLabel.textContent = rotationDeg + '°';
+    origPrevImg.style.transform = `rotate(${rotationDeg}deg)`;
+  }
+  rotateLeftBtn.addEventListener('click', () => {
+    rotationDeg = (rotationDeg - 90 + 360) % 360;
+    updateRotation();
+  });
+  rotateRightBtn.addEventListener('click', () => {
+    rotationDeg = (rotationDeg + 90) % 360;
+    updateRotation();
+  });
 
   // ── Original (Before) preview ─────────────────────────────────────────────
   async function loadOriginalPreview(file) {
@@ -773,6 +834,7 @@
     form.append('mode', modeSelect.value);
     form.append('out_format', formatSelect.value);
     form.append('dpi', dpiSelect.value);
+    form.append('rotation', rotationDeg);
 
     const data = await runWithProgress(() =>
       fetch('/enhance', { method: 'POST', body: form })
