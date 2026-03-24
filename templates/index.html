@@ -387,6 +387,67 @@
       font-variant-numeric: tabular-nums;
     }
 
+    /* Clickable preview images */
+    .prev-img { cursor: zoom-in; }
+
+    /* Lightbox overlay */
+    #lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0,0,0,.88);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      cursor: zoom-out;
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #lightbox.open { display: flex; align-items: center; justify-content: center; }
+    #lightbox-inner {
+      position: relative;
+      max-width: 95vw;
+      max-height: 95vh;
+      padding: 12px;
+    }
+    #lightbox-img {
+      display: block;
+      max-width: 95vw;
+      max-height: 92vh;
+      object-fit: contain;
+      border-radius: 6px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.5);
+      transition: transform .2s ease;
+      transform-origin: center center;
+    }
+    #lightbox-close {
+      position: fixed;
+      top: 16px;
+      right: 20px;
+      width: 36px; height: 36px;
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 50%;
+      color: #fff;
+      font-size: 1.1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background .2s;
+      z-index: 10000;
+    }
+    #lightbox-close:hover { background: rgba(255,255,255,.25); }
+    #lightbox-hint {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.72rem;
+      color: rgba(255,255,255,.45);
+      pointer-events: none;
+    }
+
     /* Error */
     #error-box {
       display: none;
@@ -635,6 +696,15 @@
       <div class="tip-desc">PDFs stay as PDF. Images are returned as JPG (color) or PNG (grayscale/BW).</div>
     </div>
   </div>
+</div>
+
+<!-- Lightbox for full-size image inspection -->
+<div id="lightbox">
+  <button id="lightbox-close" title="Close">✕</button>
+  <div id="lightbox-inner">
+    <img id="lightbox-img" alt="Full-size preview" />
+  </div>
+  <div id="lightbox-hint">Click anywhere to close · Scroll to zoom</div>
 </div>
 
 <script>
@@ -960,6 +1030,55 @@
 
   function showError(msg) { errorBox.textContent = '⚠ ' + msg; errorBox.classList.add('show'); }
   function hideError()    { errorBox.classList.remove('show'); }
+
+  // ── Lightbox (click preview image to enlarge) ──────────────────────────
+  const lightbox     = document.getElementById('lightbox');
+  const lightboxImg  = document.getElementById('lightbox-img');
+  const lightboxClose = document.getElementById('lightbox-close');
+  let lbZoom = 1;
+
+  function openLightbox(src) {
+    lightboxImg.src = src;
+    lbZoom = 1;
+    lightboxImg.style.transform = 'scale(1)';
+    lightbox.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeLightbox() {
+    lightbox.classList.remove('open');
+    document.body.style.overflow = '';
+    lightboxImg.src = '';
+  }
+
+  // Click on any preview image → open lightbox
+  origPrevImg.addEventListener('click', () => {
+    if (origPrevImg.src) openLightbox(origPrevImg.src);
+  });
+  previewImg.addEventListener('click', () => {
+    if (previewImg.src) openLightbox(previewImg.src);
+  });
+
+  // Close: click overlay, close button, or Escape
+  lightbox.addEventListener('click', e => {
+    if (e.target === lightbox || e.target === lightbox.querySelector('#lightbox-inner'))
+      closeLightbox();
+  });
+  lightboxClose.addEventListener('click', closeLightbox);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && lightbox.classList.contains('open')) closeLightbox();
+  });
+
+  // Scroll to zoom
+  lightboxImg.addEventListener('wheel', e => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.15 : 0.15;
+    lbZoom = Math.max(0.5, Math.min(5, lbZoom + delta));
+    lightboxImg.style.transform = `scale(${lbZoom})`;
+  }, { passive: false });
+
+  // Prevent image click from closing
+  lightboxImg.addEventListener('click', e => e.stopPropagation());
 
   // ── PWA Service Worker ────────────────────────────────────────────────────
   if ('serviceWorker' in navigator) {
