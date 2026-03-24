@@ -4,6 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Document Enhancer</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json" />
+  <link rel="icon" type="image/png" href="/static/favicon.png" />
+  <link rel="apple-touch-icon" href="/static/icon-192x192.png" />
+  <meta name="theme-color" content="#5b6ef5" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="DocEnhance" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -243,58 +252,16 @@
     #preview-toggle-btn:hover { border-color: var(--accent); background: rgba(91,110,245,.06); }
     #preview-toggle-btn.active { border-color: var(--accent); color: var(--accent2); }
 
-    /* Preview panel */
+    /* Enhanced (After) preview panel */
     #preview-panel {
       display: none;
       margin-top: 20px;
-      border: 1px solid var(--border);
+      border: 1px solid rgba(52,211,153,.25);
       border-radius: var(--radius);
       overflow: hidden;
       background: #0a0c14;
     }
     #preview-panel.show { display: block; }
-
-    #preview-toolbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 16px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      font-size: 0.8rem;
-      color: var(--muted);
-    }
-    #preview-toolbar strong { color: var(--text); }
-
-    #preview-body { position: relative; min-height: 120px; }
-
-    #preview-iframe {
-      width: 100%;
-      height: 65vh;
-      border: none;
-      display: block;
-    }
-    #preview-img {
-      display: block;
-      max-width: 100%;
-      margin: 0 auto;
-    }
-    #preview-zip-msg {
-      padding: 32px;
-      text-align: center;
-      color: var(--muted);
-      font-size: 0.88rem;
-      line-height: 1.7;
-    }
-    #preview-zip-msg strong { color: var(--text); display: block; margin-bottom: 6px; }
-
-    #preview-loading {
-      position: absolute; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      background: #0a0c14;
-      color: var(--muted); font-size: 0.85rem;
-    }
-    #preview-loading.hidden { display: none; }
 
     /* Reprocess section */
     #reprocess-section {
@@ -339,6 +306,147 @@
     }
     #reprocess-btn:hover { background: var(--accent2); }
     #reprocess-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* Original (Before) preview panel */
+    #orig-preview-panel {
+      display: none;
+      margin-top: 16px;
+      border: 1px solid rgba(91,110,245,.35);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #0a0c14;
+    }
+    #orig-preview-panel.show { display: block; }
+
+    .prev-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .prev-toolbar strong { color: var(--text); }
+    .prev-badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: .6px;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-right: 6px;
+    }
+    .prev-badge.before {
+      background: rgba(91,110,245,.15);
+      color: var(--accent2);
+      border: 1px solid rgba(91,110,245,.3);
+    }
+    .prev-badge.after {
+      background: rgba(52,211,153,.12);
+      color: var(--success);
+      border: 1px solid rgba(52,211,153,.3);
+    }
+    .prev-body { position: relative; min-height: 120px; }
+    .prev-img    { display: block; max-width: 100%; margin: 0 auto; }
+    .prev-loading {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: #0a0c14;
+      color: var(--muted); font-size: 0.85rem;
+    }
+    .prev-loading.hidden { display: none; }
+
+    /* Rotate controls */
+    .rotate-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .rotate-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px; height: 30px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      cursor: pointer;
+      transition: border-color .2s, color .2s, background .2s;
+      padding: 0;
+    }
+    .rotate-btn:hover { border-color: var(--accent); color: var(--accent2); background: rgba(91,110,245,.08); }
+    .rotate-angle {
+      font-size: 0.7rem;
+      color: var(--muted);
+      min-width: 30px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Clickable preview images */
+    .prev-img { cursor: zoom-in; }
+
+    /* Lightbox overlay */
+    #lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0,0,0,.88);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      cursor: zoom-out;
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #lightbox.open { display: flex; align-items: center; justify-content: center; }
+    #lightbox-inner {
+      position: relative;
+      max-width: 95vw;
+      max-height: 95vh;
+      padding: 12px;
+    }
+    #lightbox-img {
+      display: block;
+      max-width: 95vw;
+      max-height: 92vh;
+      object-fit: contain;
+      border-radius: 6px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.5);
+      transition: transform .2s ease;
+      transform-origin: center center;
+    }
+    #lightbox-close {
+      position: fixed;
+      top: 16px;
+      right: 20px;
+      width: 36px; height: 36px;
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 50%;
+      color: #fff;
+      font-size: 1.1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background .2s;
+      z-index: 10000;
+    }
+    #lightbox-close:hover { background: rgba(255,255,255,.25); }
+    #lightbox-hint {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.72rem;
+      color: rgba(255,255,255,.45);
+      pointer-events: none;
+    }
 
     /* Error */
     #error-box {
@@ -386,7 +494,7 @@
       <path stroke-linecap="round" stroke-linejoin="round"
         d="M12 16.5v-9m0 0-3 3m3-3 3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.338-2.02A4.125 4.125 0 0 1 18 19.5H6.75Z"/>
     </svg>
-    <p><strong>Drop your file here</strong><br/>PDF, JPG, PNG, TIFF, BMP, WEBP</p>
+    <p><strong>Drop, browse, or paste your file</strong><br/>PDF, JPG, PNG, TIFF, BMP, WEBP — or Ctrl+V an image</p>
     <input type="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp,.webp" />
   </div>
 
@@ -397,6 +505,30 @@
     </svg>
     <span class="name" id="chip-name"></span>
     <span class="remove" id="chip-remove" title="Remove">✕</span>
+  </div>
+
+  <!-- Before preview (shown on file select) -->
+  <div id="orig-preview-panel">
+    <div class="prev-toolbar">
+      <span><span class="prev-badge before">Before</span><strong id="orig-prev-filename"></strong></span>
+      <div class="rotate-controls">
+        <button class="rotate-btn" id="rotate-left-btn" title="Rotate left 90°">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/>
+          </svg>
+        </button>
+        <span class="rotate-angle" id="rotate-angle-label">0°</span>
+        <button class="rotate-btn" id="rotate-right-btn" title="Rotate right 90°">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 15l6-6m0 0-6-6m6 6H9a6 6 0 0 0 0 12h3"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="prev-body">
+      <div class="prev-loading" id="orig-prev-loading">Loading preview…</div>
+      <img class="prev-img" id="orig-prev-img" style="display:none;transition:transform .3s ease" alt="Original document" />
+    </div>
   </div>
 
   <!-- Options -->
@@ -476,18 +608,17 @@
       </a>
     </div>
 
-    <!-- Preview panel -->
+    <!-- After preview panel -->
     <div id="preview-panel">
-      <div id="preview-toolbar">
-        <span>Preview — <strong id="preview-filename"></strong></span>
-        <span id="preview-page-note"></span>
+      <div class="prev-toolbar">
+        <span><span class="prev-badge after">After</span><strong id="preview-filename"></strong></span>
+        <span id="preview-page-note" style="font-size:0.75rem;color:var(--muted)"></span>
       </div>
-      <div id="preview-body">
-        <div id="preview-loading">Loading preview…</div>
-        <iframe id="preview-iframe" style="display:none"></iframe>
-        <img id="preview-img" style="display:none" alt="Document preview" />
-        <div id="preview-zip-msg" style="display:none">
-          <strong>Multi-page ZIP export</strong>
+      <div class="prev-body" id="preview-body">
+        <div class="prev-loading" id="preview-loading">Loading preview…</div>
+        <img class="prev-img" id="preview-img" style="display:none" alt="Enhanced document — right-click to copy" />
+        <div id="preview-zip-msg" style="display:none;padding:32px;text-align:center;color:var(--muted);font-size:.88rem;line-height:1.7">
+          <strong style="color:var(--text);display:block;margin-bottom:6px">Multi-page ZIP export</strong>
           Showing page 1 as preview. Download the ZIP to access all pages.
         </div>
       </div>
@@ -567,6 +698,15 @@
   </div>
 </div>
 
+<!-- Lightbox for full-size image inspection -->
+<div id="lightbox">
+  <button id="lightbox-close" title="Close">✕</button>
+  <div id="lightbox-inner">
+    <img id="lightbox-img" alt="Full-size preview" />
+  </div>
+  <div id="lightbox-hint">Click anywhere to close · Scroll to zoom</div>
+</div>
+
 <script>
   // ── Element refs ──────────────────────────────────────────────────────────
   const dropZone      = document.getElementById('drop-zone');
@@ -586,13 +726,22 @@
   const errorBox      = document.getElementById('error-box');
   const downloadBtn   = document.getElementById('download-btn');
 
-  // Preview
+  // Before (original) preview
+  const origPreviewPanel  = document.getElementById('orig-preview-panel');
+  const origPrevFilename  = document.getElementById('orig-prev-filename');
+  const origPrevLoading   = document.getElementById('orig-prev-loading');
+  const origPrevImg       = document.getElementById('orig-prev-img');
+  let   origBlobUrl       = null;  // revoke on clear
+  const rotateLeftBtn     = document.getElementById('rotate-left-btn');
+  const rotateRightBtn    = document.getElementById('rotate-right-btn');
+  const rotateAngleLabel  = document.getElementById('rotate-angle-label');
+
+  // After (enhanced) preview
   const previewToggleBtn = document.getElementById('preview-toggle-btn');
   const previewPanel     = document.getElementById('preview-panel');
   const previewFilename  = document.getElementById('preview-filename');
   const previewPageNote  = document.getElementById('preview-page-note');
   const previewLoading   = document.getElementById('preview-loading');
-  const previewIframe    = document.getElementById('preview-iframe');
   const previewImg       = document.getElementById('preview-img');
   const previewZipMsg    = document.getElementById('preview-zip-msg');
 
@@ -606,6 +755,7 @@
   // ── State ─────────────────────────────────────────────────────────────────
   let selectedFile  = null;
   let currentResult = null;   // { uid, filename, download_url, preview_url, size_kb }
+  let rotationDeg   = 0;      // 0, 90, 180, 270
 
   // ── Hints ─────────────────────────────────────────────────────────────────
   const modeHints = {
@@ -636,6 +786,28 @@
   fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
   chipRemove.addEventListener('click', clearFile);
 
+  // ── Paste support ───────────────────────────────────────────────────────
+  document.addEventListener('paste', e => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        // Give the pasted blob a proper filename based on its MIME type
+        const ext = blob.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+        const ts  = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const named = new File([blob], `pasted-${ts}.${ext}`, { type: blob.type });
+        setFile(named);
+        // Briefly flash the drop zone to give visual feedback
+        dropZone.classList.add('drag-over');
+        setTimeout(() => dropZone.classList.remove('drag-over'), 300);
+        return;
+      }
+    }
+  });
+
   const ALLOWED_EXTS = new Set(['.pdf','.jpg','.jpeg','.png','.tiff','.tif','.bmp','.webp']);
 
   function setFile(f) {
@@ -650,6 +822,9 @@
     submitBtn.disabled = false;
     hideResult();
     hideError();
+    rotationDeg = 0;
+    updateRotation();
+    loadOriginalPreview(f);
   }
 
   function clearFile() {
@@ -658,6 +833,59 @@
     fileChip.classList.remove('show');
     submitBtn.disabled = true;
     hideResult();
+    hideOriginalPreview();
+  }
+
+  // ── Rotation controls ────────────────────────────────────────────────────
+  function updateRotation() {
+    rotateAngleLabel.textContent = rotationDeg + '°';
+    origPrevImg.style.transform = `rotate(${rotationDeg}deg)`;
+  }
+  rotateLeftBtn.addEventListener('click', () => {
+    rotationDeg = (rotationDeg - 90 + 360) % 360;
+    updateRotation();
+  });
+  rotateRightBtn.addEventListener('click', () => {
+    rotationDeg = (rotationDeg + 90) % 360;
+    updateRotation();
+  });
+
+  // ── Original (Before) preview ─────────────────────────────────────────────
+  async function loadOriginalPreview(file) {
+    const raw = file.name.split('.').pop().toLowerCase();
+    origPrevFilename.textContent = file.name;
+    origPrevLoading.classList.remove('hidden');
+    origPrevImg.style.display = 'none';
+    origPreviewPanel.classList.add('show');
+
+    // Revoke previous blob URL to avoid memory leaks
+    if (origBlobUrl) { URL.revokeObjectURL(origBlobUrl); origBlobUrl = null; }
+
+    if (raw === 'pdf' || raw === 'tiff' || raw === 'tif') {
+      // PDF and TIFF: render first page to PNG on server (blob PDF iframes are unreliable)
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const res  = await fetch('/preview-original', { method: 'POST', body: form });
+        const blob = await res.blob();
+        origBlobUrl = URL.createObjectURL(blob);
+        origPrevImg.src = origBlobUrl;
+        origPrevImg.onload = () => origPrevLoading.classList.add('hidden');
+        origPrevImg.style.display = 'block';
+      } catch (_) { origPrevLoading.classList.add('hidden'); }
+    } else {
+      // jpg, jpeg, png, bmp, webp — browsers handle natively via blob URL
+      origBlobUrl = URL.createObjectURL(file);
+      origPrevImg.src = origBlobUrl;
+      origPrevImg.onload = () => origPrevLoading.classList.add('hidden');
+      origPrevImg.style.display = 'block';
+    }
+  }
+
+  function hideOriginalPreview() {
+    origPreviewPanel.classList.remove('show');
+    origPrevImg.src = '';
+    if (origBlobUrl) { URL.revokeObjectURL(origBlobUrl); origBlobUrl = null; }
   }
 
   // ── Enhance ───────────────────────────────────────────────────────────────
@@ -673,6 +901,7 @@
     form.append('mode', modeSelect.value);
     form.append('out_format', formatSelect.value);
     form.append('dpi', dpiSelect.value);
+    form.append('rotation', rotationDeg);
 
     const data = await runWithProgress(() =>
       fetch('/enhance', { method: 'POST', body: form })
@@ -716,47 +945,31 @@
     const ext = result.filename.split('.').pop().toLowerCase();
     previewFilename.textContent = result.filename;
     previewLoading.classList.remove('hidden');
-    previewIframe.style.display = 'none';
     previewImg.style.display    = 'none';
     previewZipMsg.style.display = 'none';
     previewPageNote.textContent = '';
 
-    if (ext === 'pdf') {
-      previewIframe.onload = () => previewLoading.classList.add('hidden');
-      previewIframe.src = result.preview_url;
-      previewIframe.style.display = 'block';
-    } else if (ext === 'zip') {
-      previewZipMsg.style.display = 'block';
-      previewPageNote.textContent = 'Page 1 shown';
-      const img = new Image();
-      img.onload = () => {
-        previewImg.src = img.src;
-        previewImg.style.display = 'block';
-        previewZipMsg.style.display = 'none';
-        previewLoading.classList.add('hidden');
-      };
-      img.onerror = () => {
-        previewZipMsg.style.display = 'block';
-        previewLoading.classList.add('hidden');
-      };
-      img.src = result.preview_url;
-    } else {
-      // jpg, png, tiff → image (tiff converted server-side)
-      const img = new Image();
-      img.onload = () => {
-        previewImg.src = img.src;
-        previewImg.style.display = 'block';
-        previewLoading.classList.add('hidden');
-      };
-      img.src = result.preview_url;
-    }
+    if (ext === 'zip') previewPageNote.textContent = 'Page 1 shown';
+
+    // All formats (PDF, JPG, PNG, TIFF, ZIP) → /preview/ returns a PNG image
+    // Displayed as <img> so right-click → Copy Image works natively
+    const img = new Image();
+    img.onload = () => {
+      previewImg.src = img.src;
+      previewImg.style.display = 'block';
+      previewLoading.classList.add('hidden');
+    };
+    img.onerror = () => {
+      if (ext === 'zip') previewZipMsg.style.display = 'block';
+      previewLoading.classList.add('hidden');
+    };
+    img.src = result.preview_url;
   }
 
   function hidePreview() {
     previewPanel.classList.remove('show');
     previewToggleBtn.classList.remove('active');
-    previewIframe.src = '';
-    previewImg.src    = '';
+    previewImg.src = '';
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -802,6 +1015,10 @@
     rpMode.value   = modeSelect.value;
     rpFormat.value = formatSelect.value;
     rpDpi.value    = dpiSelect.value;
+    // Auto-open the enhanced preview
+    previewPanel.classList.add('show');
+    previewToggleBtn.classList.add('active');
+    loadPreview(data);
   }
 
   function hideResult() {
@@ -813,6 +1030,60 @@
 
   function showError(msg) { errorBox.textContent = '⚠ ' + msg; errorBox.classList.add('show'); }
   function hideError()    { errorBox.classList.remove('show'); }
+
+  // ── Lightbox (click preview image to enlarge) ──────────────────────────
+  const lightbox     = document.getElementById('lightbox');
+  const lightboxImg  = document.getElementById('lightbox-img');
+  const lightboxClose = document.getElementById('lightbox-close');
+  let lbZoom = 1;
+
+  function openLightbox(src) {
+    lightboxImg.src = src;
+    lbZoom = 1;
+    lightboxImg.style.transform = 'scale(1)';
+    lightbox.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeLightbox() {
+    lightbox.classList.remove('open');
+    document.body.style.overflow = '';
+    lightboxImg.src = '';
+  }
+
+  // Click on any preview image → open lightbox
+  origPrevImg.addEventListener('click', () => {
+    if (origPrevImg.src) openLightbox(origPrevImg.src);
+  });
+  previewImg.addEventListener('click', () => {
+    if (previewImg.src) openLightbox(previewImg.src);
+  });
+
+  // Close: click overlay, close button, or Escape
+  lightbox.addEventListener('click', e => {
+    if (e.target === lightbox || e.target === lightbox.querySelector('#lightbox-inner'))
+      closeLightbox();
+  });
+  lightboxClose.addEventListener('click', closeLightbox);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && lightbox.classList.contains('open')) closeLightbox();
+  });
+
+  // Scroll to zoom
+  lightboxImg.addEventListener('wheel', e => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.15 : 0.15;
+    lbZoom = Math.max(0.5, Math.min(5, lbZoom + delta));
+    lightboxImg.style.transform = `scale(${lbZoom})`;
+  }, { passive: false });
+
+  // Prevent image click from closing
+  lightboxImg.addEventListener('click', e => e.stopPropagation());
+
+  // ── PWA Service Worker ────────────────────────────────────────────────────
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+  }
 </script>
 </body>
 </html>

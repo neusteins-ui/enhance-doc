@@ -19,8 +19,11 @@ from PIL import Image
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB
 
-UPLOAD_DIR = Path("uploads")
-OUTPUT_DIR = Path("outputs")
+# Use /tmp on Vercel (read-only FS except /tmp); fall back to local dirs otherwise
+import tempfile as _tempfile
+_TMP = Path(_tempfile.gettempdir())
+UPLOAD_DIR = _TMP / "enhance_uploads"
+OUTPUT_DIR = _TMP / "enhance_outputs"
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -33,6 +36,70 @@ OUT_FORMATS = {"pdf", "jpg", "png", "tiff"}
 # ---------------------------------------------------------------------------
 # Enhancement pipeline
 # ---------------------------------------------------------------------------
+
+def estimate_background(ch: np.ndarray) -> np.ndarray:
+    """Estimate the background illumination of a document page.
+    Uses morphological closing on an aggressively downscaled copy, then upscales.
+    Small working size = kernel covers more area = better at handling
+    dark borders, vignetting, and gradual shadows at ANY input DPI.
+    """
+    h, w = ch.shape[:2]
+    # Downscale aggressively — smaller = kernel covers more relative area
+    # This is why 150 DPI looked better: less pixels = better bg estimation
+    target = 256
+    scale = min(target / max(h, w), 1.0)
+    if scale < 1.0:
+        small = cv2.resize(ch, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    else:
+        small = ch.copy()
+    # Median blur kills fine patterns (check security lines, paper texture)
+    # that would otherwise pollute the background estimate
+    small = cv2.medianBlur(small, 5)
+    sh, sw = small.shape[:2]
+    # Kernel: 1/4 of image — very large to bridge ALL dark features
+    ksize = max(sh, sw) // 4
+    ksize = ksize | 1  # ensure odd
+    ksize = max(ksize, 31)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+    # Morph close: fills text, stamps, borders — leaves only paper background
+    bg_small = cv2.morphologyEx(small, cv2.MORPH_CLOSE, kernel)
+    # Heavy smooth to make it a pure illumination map
+    bg_small = cv2.GaussianBlur(bg_small, (0, 0), sigmaX=ksize)
+    # Upscale back
+    if scale < 1.0:
+        bg = cv2.resize(bg_small, (w, h), interpolation=cv2.INTER_LINEAR)
+    else:
+        bg = bg_small
+    # Final smooth at full res — 3% of image size for seamless transitions
+    full_sigma = max(h, w) * 0.03
+    return cv2.GaussianBlur(bg, (0, 0), sigmaX=full_sigma)
+
+
+def enhance_document(img: np.ndarray, power: float = 2.2) -> np.ndarray:
+    """Core enhancement: morphological background removal + power curve.
+    1. Estimate background via morph close (handles ALL shadows and borders)
+    2. Divide by background → normalized image (background ≈ 1.0, text < 1.0)
+    3. Power curve: text gets much darker, background stays white
+    4. Clip residual near-white to pure 255
+    """
+    is_color = img.ndim == 3
+    channels = cv2.split(img) if is_color else [img]
+    out = []
+    for ch in channels:
+        bg = estimate_background(ch)
+        # Normalize: divide by background → background ≈ 1.0, text < 1.0
+        norm = ch.astype(np.float64) / np.maximum(bg.astype(np.float64), 1.0)
+        norm = np.clip(norm, 0, 1)
+        # Power curve: dramatically increases text-background separation
+        # power=2.2: a pixel at 0.7 (light gray) → 0.7^2.2 = 0.46 (much darker)
+        #            a pixel at 0.95 (near-white) → 0.95^2.2 = 0.89 → clipped to white
+        enhanced = np.power(norm, power) * 255.0
+        enhanced = np.clip(enhanced, 0, 255)
+        # Clip residual near-white to pure white (kills last traces of gray paper)
+        enhanced[enhanced > 245] = 255
+        out.append(enhanced.astype(np.uint8))
+    return cv2.merge(out) if is_color else out[0]
+
 
 def deskew(gray: np.ndarray) -> np.ndarray:
     edges = cv2.Canny(gray, 50, 150, apertureSize=3)
@@ -54,47 +121,65 @@ def deskew(gray: np.ndarray) -> np.ndarray:
                           borderMode=cv2.BORDER_REPLICATE)
 
 
-def enhance_color(bgr: np.ndarray, strength: float = 1.2) -> np.ndarray:
-    denoised = cv2.fastNlMeansDenoisingColored(bgr, None, h=10, hColor=10,
-                                                templateWindowSize=7, searchWindowSize=21)
-    gray = cv2.cvtColor(denoised, cv2.COLOR_BGR2GRAY)
-    lines = cv2.HoughLinesP(cv2.Canny(gray, 50, 150, apertureSize=3),
-                             1, np.pi / 180, threshold=100,
+def deskew_color(bgr: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100,
                              minLineLength=100, maxLineGap=10)
-    angle = 0.0
-    if lines is not None:
-        angles = [np.degrees(np.arctan2(l[0][3]-l[0][1], l[0][2]-l[0][0]))
-                  for l in lines if l[0][2] != l[0][0]
-                  and abs(np.degrees(np.arctan2(l[0][3]-l[0][1], l[0][2]-l[0][0]))) < 45]
-        if angles:
-            angle = np.median(angles)
-    if abs(angle) >= 0.3:
-        h, w = denoised.shape[:2]
-        M = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
-        denoised = cv2.warpAffine(denoised, M, (w, h), flags=cv2.INTER_LINEAR,
-                                   borderMode=cv2.BORDER_REPLICATE)
-    lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    l = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(l)
-    contrasted = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
-    blurred = cv2.GaussianBlur(contrasted, (0, 0), sigmaX=3)
-    return cv2.addWeighted(contrasted, 1 + strength, blurred, -strength, 0)
+    if lines is None:
+        return bgr
+    angles = [np.degrees(np.arctan2(l[0][3]-l[0][1], l[0][2]-l[0][0]))
+              for l in lines if l[0][2] != l[0][0]
+              and abs(np.degrees(np.arctan2(l[0][3]-l[0][1], l[0][2]-l[0][0]))) < 45]
+    if not angles:
+        return bgr
+    angle = np.median(angles)
+    if abs(angle) < 0.3:
+        return bgr
+    h, w = bgr.shape[:2]
+    M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+    return cv2.warpAffine(bgr, M, (w, h), flags=cv2.INTER_LINEAR,
+                          borderMode=cv2.BORDER_REPLICATE)
 
 
-def enhance_gray(gray: np.ndarray, strength: float = 1.5) -> np.ndarray:
-    denoised = cv2.fastNlMeansDenoising(gray, None, h=10,
-                                         templateWindowSize=7, searchWindowSize=21)
-    contrasted = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(deskew(denoised))
-    blurred = cv2.GaussianBlur(contrasted, (0, 0), sigmaX=3)
-    return cv2.addWeighted(contrasted, 1 + strength, blurred, -strength, 0)
+def enhance_color(bgr: np.ndarray) -> np.ndarray:
+    """Color: scanner-quality output from phone camera scans."""
+    # 1. Morphological background removal + power curve (the only step that matters)
+    clean = enhance_document(bgr, power=2.2)
+    # 2. Deskew
+    clean = deskew_color(clean)
+    # 3. Tight sharpening for crisp text
+    blurred = cv2.GaussianBlur(clean, (0, 0), sigmaX=0.8)
+    return cv2.addWeighted(clean, 1.5, blurred, -0.5, 0)
+
+
+def enhance_gray(gray: np.ndarray) -> np.ndarray:
+    """Grayscale: clean white background, dark crisp text."""
+    clean = enhance_document(gray, power=2.5)
+    clean = deskew(clean)
+    blurred = cv2.GaussianBlur(clean, (0, 0), sigmaX=0.8)
+    return cv2.addWeighted(clean, 1.5, blurred, -0.5, 0)
 
 
 def to_bw(gray: np.ndarray) -> np.ndarray:
-    denoised = cv2.fastNlMeansDenoising(gray, None, h=10)
-    bw = cv2.adaptiveThreshold(deskew(denoised), 255,
+    """Black & white: pure black text on pure white background."""
+    clean = enhance_document(gray, power=2.0)
+    bw = cv2.adaptiveThreshold(deskew(clean), 255,
                                 cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                 cv2.THRESH_BINARY, 31, 10)
     return cv2.morphologyEx(bw, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
+
+
+def rotate_image(pil_img: Image.Image, degrees: int) -> Image.Image:
+    """Rotate a PIL image by 0/90/180/270 degrees clockwise."""
+    degrees = degrees % 360
+    if degrees == 90:
+        return pil_img.transpose(Image.ROTATE_270)
+    elif degrees == 180:
+        return pil_img.transpose(Image.ROTATE_180)
+    elif degrees == 270:
+        return pil_img.transpose(Image.ROTATE_90)
+    return pil_img
 
 
 def enhance_page(arr_rgb: np.ndarray, mode: str) -> Image.Image:
@@ -177,12 +262,16 @@ def pages_to_zip(pil_pages: list[Image.Image], stem: str, fmt: str, dpi: int) ->
 # ---------------------------------------------------------------------------
 
 def process(input_path: Path, mode: str, dpi: int,
-            out_format: str, stem: str) -> tuple[bytes, str]:
+            out_format: str, stem: str, rotation: int = 0) -> tuple[bytes, str]:
     """
     Returns (output_bytes, output_filename).
     out_format: 'pdf' | 'jpg' | 'png' | 'tiff'
+    rotation:   0, 90, 180, 270 degrees clockwise
     """
     raw_pages  = load_pages(input_path, dpi)
+    # Apply rotation before enhancement
+    if rotation % 360 != 0:
+        raw_pages = [rotate_image(p, rotation) for p in raw_pages]
     enh_pages  = [enhance_page(np.array(p), mode) for p in raw_pages]
     multi_page = len(enh_pages) > 1
 
@@ -224,6 +313,7 @@ def enhance():
     dpi = int(request.form.get("dpi", 300))
     if dpi not in (150, 200, 300, 400, 600):
         dpi = 300
+    rotation = int(request.form.get("rotation", 0)) % 360
 
     uid  = uuid.uuid4().hex[:8]
     stem = Path(f.filename).stem
@@ -231,7 +321,7 @@ def enhance():
     f.save(str(input_path))
 
     try:
-        out_bytes, output_name = process(input_path, mode, dpi, out_format, stem)
+        out_bytes, output_name = process(input_path, mode, dpi, out_format, stem, rotation)
     except Exception as e:
         input_path.unlink(missing_ok=True)
         return jsonify(error=str(e)), 500
@@ -257,6 +347,32 @@ def download(uid, filename):
     return send_file(str(path), as_attachment=True, download_name=filename)
 
 
+@app.route("/preview-original", methods=["POST"])
+def preview_original():
+    """Convert an uploaded file's first page/frame to PNG for browser preview.
+    Only needed for formats browsers can't display natively (TIFF).
+    """
+    if "file" not in request.files:
+        return "No file", 400
+    f = request.files["file"]
+    raw = f.read()
+    try:
+        ext = Path(f.filename).suffix.lower()
+        if ext in PDF_EXTS:
+            doc = fitz.open(stream=raw, filetype="pdf")
+            pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+            pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            doc.close()
+        else:
+            pil = Image.open(BytesIO(raw)).convert("RGB")
+        buf = BytesIO()
+        pil.save(buf, format="PNG")
+        buf.seek(0)
+        return send_file(buf, mimetype="image/png")
+    except Exception as e:
+        return str(e), 500
+
+
 @app.route("/preview/<uid>/<filename>")
 def preview(uid, filename):
     """Serve a file inline for in-browser preview.
@@ -268,9 +384,16 @@ def preview(uid, filename):
 
     ext = Path(filename).suffix.lower()
 
-    # PDF — serve inline so browser renders it
+    # PDF — render first page to PNG (iframe PDF blobs are unreliable across browsers)
     if ext == ".pdf":
-        return send_file(str(path), mimetype="application/pdf")
+        doc = fitz.open(str(path))
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+        pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        doc.close()
+        buf = BytesIO()
+        pil.save(buf, format="PNG")
+        buf.seek(0)
+        return send_file(buf, mimetype="image/png")
 
     # TIFF — convert first page to PNG for browser display
     if ext in (".tiff", ".tif"):
