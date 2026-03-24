@@ -87,6 +87,30 @@ def _whiten_channel(ch: np.ndarray) -> np.ndarray:
     return np.clip(result, 0, 255).astype(np.uint8)
 
 
+def darken_text(img: np.ndarray) -> np.ndarray:
+    """Make dark pixels (text/ink) richer and blacker while leaving white background untouched.
+    Uses an adaptive gamma curve: dark pixels get gamma ~1.5 (much darker),
+    white pixels get gamma ~1.0 (unchanged). Smooth transition in between.
+    """
+    if img.ndim == 3:
+        # Color: apply only to L channel in LAB to preserve ink/stamp colors
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        l = _darken_channel(l)
+        return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+    else:
+        return _darken_channel(img)
+
+
+def _darken_channel(ch: np.ndarray) -> np.ndarray:
+    """Apply adaptive gamma to a single channel: darken darks, preserve whites."""
+    f = ch.astype(np.float32) / 255.0
+    # Adaptive gamma: 1.5 for black pixels → 1.0 for white pixels
+    gamma = 1.0 + 0.5 * (1.0 - f)
+    result = np.power(np.clip(f, 1e-6, 1.0), gamma)
+    return (result * 255).clip(0, 255).astype(np.uint8)
+
+
 def deskew(gray: np.ndarray) -> np.ndarray:
     edges = cv2.Canny(gray, 50, 150, apertureSize=3)
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100,
@@ -108,15 +132,17 @@ def deskew(gray: np.ndarray) -> np.ndarray:
 
 
 def enhance_color(bgr: np.ndarray) -> np.ndarray:
-    """Color enhancement: clean background, preserve detail, sharpen text."""
-    # 1. Light denoising — just enough to remove scanner grain, not smear text
+    """Color enhancement: clean background, darken text, sharpen."""
+    # 1. Light denoising — remove scanner grain without smearing text
     denoised = cv2.fastNlMeansDenoisingColored(bgr, None, h=6, hColor=6,
                                                 templateWindowSize=7, searchWindowSize=21)
     # 2. Shadow removal → normalize illumination
     denoised = remove_shadow(denoised)
-    # 3. Whiten background → pure white paper, text untouched
+    # 3. Whiten background → pure white paper
     denoised = whiten_background(denoised)
-    # 4. Deskew
+    # 4. Darken text → make ink richer and blacker
+    denoised = darken_text(denoised)
+    # 5. Deskew
     gray = cv2.cvtColor(denoised, cv2.COLOR_BGR2GRAY)
     lines = cv2.HoughLinesP(cv2.Canny(gray, 50, 150, apertureSize=3),
                              1, np.pi / 180, threshold=100,
@@ -133,26 +159,26 @@ def enhance_color(bgr: np.ndarray) -> np.ndarray:
         M = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
         denoised = cv2.warpAffine(denoised, M, (w, h), flags=cv2.INTER_LINEAR,
                                    borderMode=cv2.BORDER_REPLICATE)
-    # 5. Gentle CLAHE on lightness only — boosts text contrast without artifacts
+    # 6. Gentle CLAHE on lightness — boosts text contrast without artifacts
     lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     l = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8)).apply(l)
     contrasted = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
-    # 6. Precise unsharp mask — small sigma for tight sharpening, moderate strength
+    # 7. Unsharp mask — crisp text edges
     blurred = cv2.GaussianBlur(contrasted, (0, 0), sigmaX=1.0)
-    sharpened = cv2.addWeighted(contrasted, 1.5, blurred, -0.5, 0)
-    return sharpened
+    return cv2.addWeighted(contrasted, 1.6, blurred, -0.6, 0)
 
 
 def enhance_gray(gray: np.ndarray) -> np.ndarray:
-    """Grayscale enhancement: clean, sharp, white background."""
+    """Grayscale enhancement: clean, sharp, white background, dark text."""
     denoised = cv2.fastNlMeansDenoising(gray, None, h=8,
                                          templateWindowSize=7, searchWindowSize=21)
     denoised = remove_shadow(denoised)
     denoised = whiten_background(denoised)
+    denoised = darken_text(denoised)
     contrasted = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8)).apply(deskew(denoised))
     blurred = cv2.GaussianBlur(contrasted, (0, 0), sigmaX=1.0)
-    return cv2.addWeighted(contrasted, 1.5, blurred, -0.5, 0)
+    return cv2.addWeighted(contrasted, 1.6, blurred, -0.6, 0)
 
 
 def to_bw(gray: np.ndarray) -> np.ndarray:
@@ -160,6 +186,7 @@ def to_bw(gray: np.ndarray) -> np.ndarray:
     denoised = cv2.fastNlMeansDenoising(gray, None, h=8)
     denoised = remove_shadow(denoised)
     denoised = whiten_background(denoised)
+    denoised = darken_text(denoised)
     bw = cv2.adaptiveThreshold(deskew(denoised), 255,
                                 cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                 cv2.THRESH_BINARY, 31, 10)
