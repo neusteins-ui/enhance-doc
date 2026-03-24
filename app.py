@@ -38,61 +38,53 @@ OUT_FORMATS = {"pdf", "jpg", "png", "tiff"}
 # ---------------------------------------------------------------------------
 
 def remove_shadow(img: np.ndarray) -> np.ndarray:
-    """Aggressively remove shadows and normalize background to white.
-    Accepts grayscale (H, W) or BGR/RGB (H, W, 3) uint8 arrays.
-    Strategy:
-      1. Large dilation to flood-fill dark text so background estimation isn't biased.
-      2. Very large Gaussian blur → smooth illumination map.
-      3. Divide each channel by its background → normalize to white (255).
-      4. Push near-white pixels to pure white (background whitening).
+    """Remove uneven illumination / shadows via divide-by-background.
+    Preserves text darkness while normalizing the background to ~white.
     """
     is_color = img.ndim == 3
     channels = cv2.split(img) if is_color else [img]
-    # Larger kernel = better text flood-fill for background estimation
-    kernel = np.ones((15, 15), np.uint8)
+    kernel = np.ones((9, 9), np.uint8)
     out = []
     for ch in channels:
-        dilated = cv2.dilate(ch, kernel, iterations=2)
-        # Large sigma captures gradual shadow gradients
-        bg = cv2.GaussianBlur(dilated, (0, 0), sigmaX=80)
+        # Dilate fills in dark text so it doesn't pull the background estimate down
+        dilated = cv2.dilate(ch, kernel, iterations=1)
+        # Large blur → smooth illumination map
+        bg = cv2.GaussianBlur(dilated, (0, 0), sigmaX=60)
+        # Divide original by background → removes shadows, normalizes to ~255
         norm = cv2.divide(ch.astype(np.float32), bg.astype(np.float32), scale=255.0)
         out.append(np.clip(norm, 0, 255).astype(np.uint8))
-    result = cv2.merge(out) if is_color else out[0]
-    return result
+    return cv2.merge(out) if is_color else out[0]
 
 
-def whiten_background(img: np.ndarray, threshold: int = 200) -> np.ndarray:
-    """Push near-white pixels to pure 255 white.
-    Everything above `threshold` (per channel) becomes 255.
-    Below threshold is stretched for better contrast.
+def whiten_background(img: np.ndarray) -> np.ndarray:
+    """Push background pixels to pure white while leaving text untouched.
+    Uses percentile-based threshold so it adapts to each document.
+    Only affects pixels clearly in the background — no stretching of dark/text pixels.
     """
     if img.ndim == 3:
-        # Work in LAB to only whiten lightness, preserving color of ink/stamps
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
-        # Map: 0→0, threshold→threshold, 255→255  but push light areas to white
-        mask = l > threshold
-        l[mask] = 255
-        # Stretch the remaining range for better contrast
-        dark = l[~mask]
-        if dark.size > 0:
-            lo = max(dark.min(), 0)
-            hi = min(dark.max(), threshold)
-            if hi > lo:
-                l[~mask] = np.clip(((dark.astype(np.float32) - lo) / (hi - lo) * threshold), 0, threshold).astype(np.uint8)
+        l = _whiten_channel(l)
         return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
     else:
-        # Grayscale
-        result = img.copy()
-        mask = result > threshold
-        result[mask] = 255
-        dark = result[~mask]
-        if dark.size > 0:
-            lo = max(dark.min(), 0)
-            hi = min(dark.max(), threshold)
-            if hi > lo:
-                result[~mask] = np.clip(((dark.astype(np.float32) - lo) / (hi - lo) * threshold), 0, threshold).astype(np.uint8)
-        return result
+        return _whiten_channel(img)
+
+
+def _whiten_channel(ch: np.ndarray) -> np.ndarray:
+    """Whiten a single grayscale channel. Background → 255, text untouched."""
+    result = ch.copy().astype(np.float32)
+    # Find the background level: the 85th percentile is typically background
+    bg_level = np.percentile(result, 85)
+    # Anything above (bg_level - 30) is probably background; push it toward 255
+    # Use a smooth ramp so there's no harsh cutoff
+    low = max(bg_level - 30, 128)
+    high = min(bg_level + 10, 250)
+    if high > low:
+        mask = result > low
+        # Ramp: pixels at `low` stay, pixels at `high` and above → 255
+        factor = np.clip((result - low) / (high - low), 0, 1)
+        result = np.where(mask, result + factor * (255.0 - result), result)
+    return np.clip(result, 0, 255).astype(np.uint8)
 
 
 def deskew(gray: np.ndarray) -> np.ndarray:
@@ -115,14 +107,15 @@ def deskew(gray: np.ndarray) -> np.ndarray:
                           borderMode=cv2.BORDER_REPLICATE)
 
 
-def enhance_color(bgr: np.ndarray, strength: float = 1.8) -> np.ndarray:
-    # 1. Aggressive denoising — higher h values remove more noise/grain
-    denoised = cv2.fastNlMeansDenoisingColored(bgr, None, h=16, hColor=12,
+def enhance_color(bgr: np.ndarray) -> np.ndarray:
+    """Color enhancement: clean background, preserve detail, sharpen text."""
+    # 1. Light denoising — just enough to remove scanner grain, not smear text
+    denoised = cv2.fastNlMeansDenoisingColored(bgr, None, h=6, hColor=6,
                                                 templateWindowSize=7, searchWindowSize=21)
-    # 2. Shadow removal (illumination normalization)
+    # 2. Shadow removal → normalize illumination
     denoised = remove_shadow(denoised)
-    # 3. Background whitening — push near-white to pure white
-    denoised = whiten_background(denoised, threshold=195)
+    # 3. Whiten background → pure white paper, text untouched
+    denoised = whiten_background(denoised)
     # 4. Deskew
     gray = cv2.cvtColor(denoised, cv2.COLOR_BGR2GRAY)
     lines = cv2.HoughLinesP(cv2.Canny(gray, 50, 150, apertureSize=3),
@@ -140,36 +133,36 @@ def enhance_color(bgr: np.ndarray, strength: float = 1.8) -> np.ndarray:
         M = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
         denoised = cv2.warpAffine(denoised, M, (w, h), flags=cv2.INTER_LINEAR,
                                    borderMode=cv2.BORDER_REPLICATE)
-    # 5. CLAHE with higher clip for stronger contrast
+    # 5. Gentle CLAHE on lightness only — boosts text contrast without artifacts
     lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    l = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(l)
+    l = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8)).apply(l)
     contrasted = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
-    # 6. Stronger unsharp mask for crisp text
-    blurred = cv2.GaussianBlur(contrasted, (0, 0), sigmaX=2)
-    sharpened = cv2.addWeighted(contrasted, 1 + strength, blurred, -strength, 0)
-    # 7. Second pass whitening on the sharpened result
-    return whiten_background(sharpened, threshold=210)
+    # 6. Precise unsharp mask — small sigma for tight sharpening, moderate strength
+    blurred = cv2.GaussianBlur(contrasted, (0, 0), sigmaX=1.0)
+    sharpened = cv2.addWeighted(contrasted, 1.5, blurred, -0.5, 0)
+    return sharpened
 
 
-def enhance_gray(gray: np.ndarray, strength: float = 2.0) -> np.ndarray:
-    denoised = cv2.fastNlMeansDenoising(gray, None, h=16,
+def enhance_gray(gray: np.ndarray) -> np.ndarray:
+    """Grayscale enhancement: clean, sharp, white background."""
+    denoised = cv2.fastNlMeansDenoising(gray, None, h=8,
                                          templateWindowSize=7, searchWindowSize=21)
     denoised = remove_shadow(denoised)
-    denoised = whiten_background(denoised, threshold=195)
-    contrasted = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(deskew(denoised))
-    blurred = cv2.GaussianBlur(contrasted, (0, 0), sigmaX=2)
-    sharpened = cv2.addWeighted(contrasted, 1 + strength, blurred, -strength, 0)
-    return whiten_background(sharpened, threshold=210)
+    denoised = whiten_background(denoised)
+    contrasted = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8)).apply(deskew(denoised))
+    blurred = cv2.GaussianBlur(contrasted, (0, 0), sigmaX=1.0)
+    return cv2.addWeighted(contrasted, 1.5, blurred, -0.5, 0)
 
 
 def to_bw(gray: np.ndarray) -> np.ndarray:
-    denoised = cv2.fastNlMeansDenoising(gray, None, h=16)
+    """Black & white: maximum text clarity, pure white background."""
+    denoised = cv2.fastNlMeansDenoising(gray, None, h=8)
     denoised = remove_shadow(denoised)
-    denoised = whiten_background(denoised, threshold=190)
+    denoised = whiten_background(denoised)
     bw = cv2.adaptiveThreshold(deskew(denoised), 255,
                                 cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                cv2.THRESH_BINARY, 31, 12)
+                                cv2.THRESH_BINARY, 31, 10)
     return cv2.morphologyEx(bw, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
 
 

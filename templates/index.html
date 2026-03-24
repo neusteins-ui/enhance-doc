@@ -350,7 +350,6 @@
       border: 1px solid rgba(52,211,153,.3);
     }
     .prev-body { position: relative; min-height: 120px; }
-    .prev-iframe { width: 100%; height: 65vh; border: none; display: block; }
     .prev-img    { display: block; max-width: 100%; margin: 0 auto; }
     .prev-loading {
       position: absolute; inset: 0;
@@ -556,8 +555,7 @@
       </div>
       <div class="prev-body" id="preview-body">
         <div class="prev-loading" id="preview-loading">Loading preview…</div>
-        <iframe class="prev-iframe" id="preview-iframe" style="display:none"></iframe>
-        <img    class="prev-img"    id="preview-img"    style="display:none" alt="Enhanced document" />
+        <img class="prev-img" id="preview-img" style="display:none" alt="Enhanced document — right-click to copy" />
         <div id="preview-zip-msg" style="display:none;padding:32px;text-align:center;color:var(--muted);font-size:.88rem;line-height:1.7">
           <strong style="color:var(--text);display:block;margin-bottom:6px">Multi-page ZIP export</strong>
           Showing page 1 as preview. Download the ZIP to access all pages.
@@ -674,7 +672,6 @@
   const previewFilename  = document.getElementById('preview-filename');
   const previewPageNote  = document.getElementById('preview-page-note');
   const previewLoading   = document.getElementById('preview-loading');
-  const previewIframe    = document.getElementById('preview-iframe');
   const previewImg       = document.getElementById('preview-img');
   const previewZipMsg    = document.getElementById('preview-zip-msg');
 
@@ -878,36 +875,25 @@
     const ext = result.filename.split('.').pop().toLowerCase();
     previewFilename.textContent = result.filename;
     previewLoading.classList.remove('hidden');
-    previewIframe.style.display = 'none';
     previewImg.style.display    = 'none';
     previewZipMsg.style.display = 'none';
     previewPageNote.textContent = '';
 
-    if (ext === 'zip') {
-      previewZipMsg.style.display = 'block';
-      previewPageNote.textContent = 'Page 1 shown';
-      const img = new Image();
-      img.onload = () => {
-        previewImg.src = img.src;
-        previewImg.style.display = 'block';
-        previewZipMsg.style.display = 'none';
-        previewLoading.classList.add('hidden');
-      };
-      img.onerror = () => {
-        previewZipMsg.style.display = 'block';
-        previewLoading.classList.add('hidden');
-      };
-      img.src = result.preview_url;
-    } else {
-      // jpg, png, tiff → image (tiff converted server-side)
-      const img = new Image();
-      img.onload = () => {
-        previewImg.src = img.src;
-        previewImg.style.display = 'block';
-        previewLoading.classList.add('hidden');
-      };
-      img.src = result.preview_url;
-    }
+    if (ext === 'zip') previewPageNote.textContent = 'Page 1 shown';
+
+    // All formats (PDF, JPG, PNG, TIFF, ZIP) → /preview/ returns a PNG image
+    // Displayed as <img> so right-click → Copy Image works natively
+    const img = new Image();
+    img.onload = () => {
+      previewImg.src = img.src;
+      previewImg.style.display = 'block';
+      previewLoading.classList.add('hidden');
+    };
+    img.onerror = () => {
+      if (ext === 'zip') previewZipMsg.style.display = 'block';
+      previewLoading.classList.add('hidden');
+    };
+    img.src = result.preview_url;
   }
 
   function hidePreview() {
