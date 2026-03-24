@@ -406,7 +406,7 @@
       <path stroke-linecap="round" stroke-linejoin="round"
         d="M12 16.5v-9m0 0-3 3m3-3 3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.338-2.02A4.125 4.125 0 0 1 18 19.5H6.75Z"/>
     </svg>
-    <p><strong>Drop your file here</strong><br/>PDF, JPG, PNG, TIFF, BMP, WEBP</p>
+    <p><strong>Drop, browse, or paste your file</strong><br/>PDF, JPG, PNG, TIFF, BMP, WEBP — or Ctrl+V an image</p>
     <input type="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp,.webp" />
   </div>
 
@@ -673,6 +673,28 @@
   });
   fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
   chipRemove.addEventListener('click', clearFile);
+
+  // ── Paste support ───────────────────────────────────────────────────────
+  document.addEventListener('paste', e => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        // Give the pasted blob a proper filename based on its MIME type
+        const ext = blob.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+        const ts  = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const named = new File([blob], `pasted-${ts}.${ext}`, { type: blob.type });
+        setFile(named);
+        // Briefly flash the drop zone to give visual feedback
+        dropZone.classList.add('drag-over');
+        setTimeout(() => dropZone.classList.remove('drag-over'), 300);
+        return;
+      }
+    }
+  });
 
   const ALLOWED_EXTS = new Set(['.pdf','.jpg','.jpeg','.png','.tiff','.tif','.bmp','.webp']);
 
